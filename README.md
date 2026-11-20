@@ -9,6 +9,7 @@
 | 能力 | 包 | 说明 |
 |---|---|---|
 | 基础 | `secret` `failure` `evidence` | 不可打印的秘密；稳定失败码；证据状态、来源、覆盖度、显式字段指纹 |
+| 整数区间 | `set` | 闭区间集合、并交差、VLAN 与端口列表的文本编解码；导入 `github.com/gatework/netops/set` |
 | 设备清单 | `device` `inventory` | 统一设备身份、去重校验的清单、选择器语法；静态 YAML 与 Netdisco 来源 |
 | 配置解析 | `parse` `config` | 行索引、未解析行记账、字段/定宽表/缩进树；配置方言、规范化与摘要、秘密遮蔽 |
 | 批量采集 | `capture` `batch` `store/snapshot` | 原始回显模型；有界并发与完整账目；快照目录 |
