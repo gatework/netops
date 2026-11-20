@@ -1,0 +1,11 @@
+Value Required LOCAL_PORT (\S+)
+Value SYSTEM (\S+)
+Value CHASSIS_ID (\S+)
+Value Required PORT (\S+)
+
+Start
+  ^\s*Local information:\s*$$ -> Record
+  ^\s*Local interface:\s*${LOCAL_PORT}\s*$$
+  ^\s*Chassis ID:\s*${CHASSIS_ID}\s*$$
+  ^\s*Port ID:\s*${PORT}\s*$$
+  ^\s*System name:\s*${SYSTEM}\s*$$

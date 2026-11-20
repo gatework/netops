@@ -1,0 +1,150 @@
+# netops import boundaries (STANDARD.md ARC-1), enforced by archcheck in `make check`.
+# Direction: ops -> edge adapters' ports; edge (store, inventory, credential,
+# bootstrap, term) -> domain; domain -> foundation. Devices are reached only
+# through the ops ports, which a transport module (net-connector) implements;
+# netops never imports a transport.
+declared:
+  - .
+  - ./secret
+  - ./failure
+  - ./evidence
+  - ./device
+  - ./iface
+  - ./neighbor
+  - ./facts
+  - ./describe
+  - ./parse
+  - ./capture
+  - ./config
+  - ./diff
+  - ./drift
+  - ./assess
+  - ./baseline
+  - ./health
+  - ./change
+  - ./governance
+  - ./rollout
+  - ./apply
+  - ./batch
+  - ./cache
+  - ./store
+  - ./store/snapshot
+  - ./store/archive
+  - ./store/journal
+  - ./store/disk
+  - ./credential
+  - ./inventory
+  - ./bootstrap
+  - ./term
+  - ./ops
+  - ./internal/fake
+
+rules:
+  - name: netops never imports a consumer, a transport or a retired kernel
+    packages: [./...]
+    deny: [github.com/gatework/fabric/..., github.com/gatework/wireless/..., github.com/gatework/go-vxlan/...,
+           github.com/gatework/firemon/..., github.com/gatework/net-connector/..., github.com/gatework/go-expect/...,
+           github.com/gatework/go-wireless/..., github.com/gatework/go-netops/..., github.com/gatework/parser/...]
+    transitive: true
+
+  - name: root documents the module only
+    packages: [.]
+    deny: [./...]
+
+  - name: domain packages stay free of I/O and transport
+    packages: [./secret, ./failure, ./evidence, ./device, ./iface, ./neighbor, ./facts, ./describe, ./parse, ./capture,
+               ./config, ./diff, ./drift, ./assess, ./baseline, ./health, ./change, ./governance, ./rollout,
+               ./apply, ./batch, ./cache, ./ops]
+    deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall]
+
+  - name: foundation depends on nothing local
+    packages: [./secret, ./failure]
+    deny: [./...]
+
+  - name: evidence and device are the base of the model
+    packages: [./evidence, ./device]
+    deny: [./...]
+
+  - name: iface is a leaf
+    packages: [./iface]
+    deny: [./...]
+
+  - name: neighbor knows interface names only
+    packages: [./neighbor]
+    only_local: [./iface]
+
+  - name: facts compares device reports with the inventory
+    packages: [./facts]
+    only_local: [./device]
+
+  - name: describe joins neighbors, configuration and change
+    packages: [./describe]
+    only_local: [./capture, ./change, ./config, ./device, ./evidence, ./iface, ./neighbor, ./parse, ./secret, ./failure]
+
+  - name: parse builds on evidence
+    packages: [./parse]
+    only_local: [./evidence]
+
+  - name: capture is raw evidence
+    packages: [./capture]
+    only_local: [./evidence, ./failure, ./parse]
+
+  - name: config is syntax
+    packages: [./config]
+    only_local: [./evidence, ./parse, ./secret]
+
+  - name: diff compares configurations and collections
+    packages: [./diff]
+    only_local: [./config, ./parse, ./evidence, ./secret]
+
+  - name: assess depends only on evidence
+    packages: [./assess]
+    only_local: [./evidence]
+
+  - name: drift builds on assess
+    packages: [./drift]
+    only_local: [./assess, ./evidence]
+
+  - name: baseline builds on drift and config
+    packages: [./baseline]
+    only_local: [./assess, ./config, ./device, ./drift, ./evidence, ./parse, ./secret]
+
+  - name: health judges evidence and findings
+    packages: [./health]
+    only_local: [./assess, ./evidence]
+
+  - name: change models plans over devices
+    packages: [./change]
+    only_local: [./device, ./evidence, ./secret]
+
+  - name: governance and rollout are independent policies
+    packages: [./governance, ./rollout]
+    only_local: [./device, ./evidence]
+
+  - name: apply executes plans
+    packages: [./apply]
+    only_local: [./change, ./device, ./evidence, ./failure, ./secret]
+
+  - name: batch and cache schedule devices
+    packages: [./batch, ./cache]
+    only_local: [./device, ./evidence, ./failure]
+
+  - name: stores persist domain values only
+    packages: [./store, ./store/...]
+    deny: [./inventory, ./credential, ./bootstrap, ./term, ./ops]
+
+  - name: credentials know devices and secrets only
+    packages: [./credential]
+    only_local: [./device, ./failure, ./secret]
+
+  - name: inventory loads devices
+    packages: [./inventory]
+    only_local: [./device, ./secret, ./store/disk]
+
+  - name: bootstrap and term are generic tool plumbing
+    packages: [./bootstrap, ./term]
+    deny: [./...]
+
+  - name: ops uses ports, never adapters
+    packages: [./ops]
+    deny: [./store, ./store/..., ./inventory, ./credential, ./bootstrap, ./term]

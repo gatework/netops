@@ -1,0 +1,19 @@
+Value Required LOCAL_PORT (\S+)
+Value CHASSIS_ID (\S+)
+Value Required PORT (\S+)
+Value SYSTEM (\S+)
+
+Start
+  ^\s*Local Interface\s*:\s*${LOCAL_PORT}\s*$$ -> Neighbor
+
+Neighbor
+  ^\s*Management (?:address|Info)\b.*$$ -> Management
+  ^\s*Local Interface\s*:\s*(\S+)\s*$$ -> Continue.Record
+  ^\s*Local Interface\s*:\s*${LOCAL_PORT}\s*$$
+  ^\s*Chassis (?:ID|Id)\s*:\s*${CHASSIS_ID}\s*$$
+  ^\s*Port ID\s*:\s*${PORT}\s*$$
+  ^\s*System name\s*:\s*${SYSTEM}\s*$$
+
+Management
+  ^\s*Local Interface\s*:\s*(\S+)\s*$$ -> Continue.Record
+  ^\s*Local Interface\s*:\s*${LOCAL_PORT}\s*$$ -> Neighbor

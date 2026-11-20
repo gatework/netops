@@ -1,0 +1,9 @@
+Value Required LOCAL_PORT ([A-Za-z][A-Za-z0-9-]*[ \t]*\d[\w/.:-]*)
+Value Required SYSTEM (\S+)
+Value Required PORT ([A-Za-z][A-Za-z0-9-]*[ \t]*\d[\w/.:-]*|\S+)
+
+Start
+  ^\s*Local Intf\s+Neighbor Dev\s+Neighbor Intf\s+Exptime.*$$ -> Neighbors
+
+Neighbors
+  ^\s*${LOCAL_PORT}\s+${SYSTEM}\s+${PORT}\s+\d+\s*$$ -> Record

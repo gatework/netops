@@ -1,0 +1,7 @@
+Value Required LOCAL_PORT (\S+)
+Value Required SYSTEM (\S+)
+Value Required PORT (\S+)
+
+Start
+  ^\s*Device ID:\s*${SYSTEM}\s*$$
+  ^\s*Interface:\s*${LOCAL_PORT},\s*Port ID \(outgoing port\):\s*${PORT}\s*$$ -> Record

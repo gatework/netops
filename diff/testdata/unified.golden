@@ -1,0 +1,9 @@
+--- a/sw1
++++ b/sw1
+@@ -2,4 +2,5 @@
+ interface Eth1/1
+- description old
++ description new
+  shutdown
+ ntp server 192.0.2.1
++ntp server 192.0.2.2
