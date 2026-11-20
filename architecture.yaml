@@ -5,6 +5,7 @@
 # netops never imports a transport.
 declared:
   - .
+  - ./set
   - ./secret
   - ./failure
   - ./evidence
@@ -40,6 +41,11 @@ declared:
   - ./internal/fake
 
 rules:
+  - name: integer range sets depend only on the standard library
+    packages: [./set]
+    deny: [./..., github.com/..., golang.org/..., go4.org/..., go.yaml.in/..., gopkg.in/...]
+    transitive: true
+
   - name: netops never imports a consumer, a transport or a retired kernel
     packages: [./...]
     deny: [github.com/gatework/fabric/..., github.com/gatework/wireless/..., github.com/gatework/go-vxlan/...,

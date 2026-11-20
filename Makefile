@@ -10,6 +10,7 @@ modverify:
 FUZZTIME ?= 30s
 
 fuzz:
+	$(GO) test -run '^$$' -fuzz '^FuzzSet$$' -fuzztime $(FUZZTIME) ./set
 	$(GO) test -run '^$$' -fuzz FuzzNew -fuzztime $(FUZZTIME) ./parse
 	$(GO) test -run '^$$' -fuzz FuzzParse -fuzztime $(FUZZTIME) ./config
 	$(GO) test -run '^$$' -fuzz FuzzLines -fuzztime $(FUZZTIME) ./diff
