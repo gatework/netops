@@ -41,7 +41,11 @@ func TestDecodeYAML_strict(t *testing.T) {
 func TestEnv_Discover(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	p := filepath.Join(home, ".config", "tool", "tool.yml")
+	e0 := bootstrap.Env{App: "tool", Home: home, Environ: map[string]string{}}
+	if got := e0.Discover(); got != "" {
+		t.Errorf("Discover without a file = %q", got)
+	}
+	p := filepath.Join(home, ".gatework", "tool.yml")
 	_ = os.MkdirAll(filepath.Dir(p), 0o700)
 	_ = os.WriteFile(p, nil, 0o600)
 	e := bootstrap.Env{App: "tool", Home: home, Environ: map[string]string{}}
@@ -51,6 +55,31 @@ func TestEnv_Discover(t *testing.T) {
 	e.Environ["TOOL_CONFIG"] = "~/x.yml"
 	if got := e.Discover(); got != filepath.Join(home, "x.yml") {
 		t.Errorf("explicit = %q", got)
+	}
+}
+
+func TestEnv_DataDir(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  bootstrap.Env
+		want string
+	}{
+		{"home", bootstrap.Env{App: "tool", Home: "/home/ops"}, "/home/ops/.local/share/gatework/tool"},
+		{"xdg ignored", bootstrap.Env{App: "tool", Home: "/home/ops", Environ: map[string]string{"XDG_DATA_HOME": "/data"}},
+			"/home/ops/.local/share/gatework/tool"},
+		{"no home", bootstrap.Env{App: "tool"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.env.DataDir(); got != tt.want {
+				t.Errorf("DataDir = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	if got := (bootstrap.Env{App: "tool", Home: "/home/ops"}).ConfigPath(); got != "/home/ops/.gatework/tool.yml" {
+		t.Errorf("ConfigPath = %q", got)
 	}
 }
 

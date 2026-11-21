@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-20
+
+### Changed
+
+- `bootstrap`：统一 gatework 工具目录布局。配置发现改为 `$<APP>_CONFIG` → `./<app>.yml` → `~/.gatework/<app>.yml`（不再查找 `$XDG_CONFIG_HOME/<app>/` 与 `~/.config/<app>/`）；`.env` 随之默认为 `~/.gatework/.env`。新增 `Env.ConfigPath`、`Env.DataDir`（`~/.local/share/gatework/<app>`，不随 `$XDG_DATA_HOME` 变化）与常量 `ConfigHome`、`DataHome`。
+
 ## [0.2.0] - 2026-11-20
 
 - 新增 `netops/set`，完整提供原 `gatework/set v0.2.0` 的整数闭区间 API。
