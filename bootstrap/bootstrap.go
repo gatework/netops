@@ -52,6 +52,14 @@ func ReadFile(ctx context.Context, path string, missingOK bool) (body []byte, fo
 	return body, true, nil
 }
 
+// ConfigHome is the directory, relative to the home directory, that holds
+// every gatework tool's configuration file <app>.yml.
+const ConfigHome = ".gatework"
+
+// DataHome is the directory, relative to the home directory, that holds
+// every gatework tool's data directory <app>.
+const DataHome = ".local/share/gatework"
+
 // ErrConfig reports an invalid configuration or environment file.
 var ErrConfig = errors.New("bootstrap: invalid configuration")
 
@@ -73,20 +81,16 @@ func Environ(pairs []string) map[string]string {
 	return out
 }
 
-// Discover returns the configuration path, or "" when none exists. An
-// explicit $<APP>_CONFIG is returned even when missing, so that the read
-// reports it.
+// Discover returns the configuration path, or "" when none exists:
+// $<APP>_CONFIG, ./<app>.yml, then ConfigPath. An explicit $<APP>_CONFIG is
+// returned even when missing, so that the read reports it.
 func (e Env) Discover() string {
 	if p := e.Environ[strings.ToUpper(e.App)+"_CONFIG"]; p != "" {
 		return ResolvePath(p, ".", e.Home)
 	}
-	name := e.App + ".yml"
-	candidates := []string{name}
-	if xdg := e.Environ["XDG_CONFIG_HOME"]; xdg != "" {
-		candidates = append(candidates, filepath.Join(xdg, e.App, name))
-	}
-	if e.Home != "" {
-		candidates = append(candidates, filepath.Join(e.Home, ".config", e.App, name))
+	candidates := []string{e.App + ".yml"}
+	if p := e.ConfigPath(); p != "" {
+		candidates = append(candidates, p)
 	}
 	for _, p := range candidates {
 		if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() {
@@ -94,6 +98,27 @@ func (e Env) Discover() string {
 		}
 	}
 	return ""
+}
+
+// ConfigPath returns the default configuration file ~/.gatework/<app>.yml,
+// whether or not it exists, or "" without a home directory.
+func (e Env) ConfigPath() string {
+	if e.Home == "" {
+		return ""
+	}
+	return filepath.Join(e.Home, ConfigHome, e.App+".yml")
+}
+
+// DataDir returns the tool's data directory ~/.local/share/gatework/<app>,
+// or "" without a home directory. Tools put caches, snapshots and journals
+// in subdirectories of it. The location deliberately ignores
+// $XDG_DATA_HOME so that every gatework tool, including libraries that
+// only see the home directory, agrees on it.
+func (e Env) DataDir() string {
+	if e.Home == "" {
+		return ""
+	}
+	return filepath.Join(e.Home, filepath.FromSlash(DataHome), e.App)
 }
 
 // ResolvePath expands "~" and "~/..." with home and makes a relative path
