@@ -18,6 +18,7 @@ import (
 	"github.com/gatework/netops/config"
 	"github.com/gatework/netops/device"
 	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/failure"
 	"github.com/gatework/netops/governance"
 	"github.com/gatework/netops/health"
 	"github.com/gatework/netops/internal/fake"
@@ -324,5 +325,50 @@ func TestDeploy(t *testing.T) {
 			}
 			tc.check(t, rep, devs, j)
 		})
+	}
+}
+
+// configDialer hands out sessions that read the configuration themselves.
+type configDialer struct {
+	text string
+	err  error
+}
+
+type configSession struct {
+	ops.Session
+	d *configDialer
+}
+
+func (s configSession) Config(context.Context) (string, error) { return s.d.text, s.d.err }
+
+func (d *configDialer) CanConnect(context.Context, device.Device) bool { return true }
+
+func (d *configDialer) Open(ctx context.Context, _ device.Device, fn func(context.Context, ops.Session) error) (error, error) {
+	return fn(ctx, configSession{d: d}), nil
+}
+
+// Backup prefers the session's own configuration reader, so platform
+// guards and completeness checks apply; its refusal fails the backup.
+func TestBackupPrefersConfigReader(t *testing.T) {
+	t.Parallel()
+	dev := device.Device{ID: "sw1", Mgmt: netip.MustParseAddr("192.0.2.1"), Platform: "cisco_ios"}.Normalize()
+	req := func(d ops.Dialer, a ops.Archive) ops.BackupRequest {
+		return ops.BackupRequest{
+			Devices: []device.Device{dev}, Dialer: d, Archive: a,
+			Command: func(device.Device) string { t.Error("Command used despite ConfigReader"); return "" },
+			Dialect: func(device.Device) config.Dialect { return config.Cisco() },
+		}
+	}
+	a, err := archive.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := ops.Backup(t.Context(), req(&configDialer{text: "hostname sw1\n!\nend"}, a))
+	if err != nil || len(rep.Results) != 1 || rep.Results[0].Err != nil {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	rep, _ = ops.Backup(t.Context(), req(&configDialer{err: failure.New(failure.CodeIncomplete, "x").Because("config_truncated")}, a))
+	if len(rep.Results) != 1 || failure.Primary(rep.Results[0].Err) != failure.CodeIncomplete {
+		t.Fatalf("truncated: %+v", rep)
 	}
 }
