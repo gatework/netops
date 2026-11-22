@@ -63,7 +63,8 @@ type DeployRequest[C any] struct {
 	// Authorize, when set, must allow every planned device before anything
 	// runs; one refusal refuses the whole change set.
 	Authorize func(device.Device) error
-	// Leases, when set, leases each wave's devices before any session opens
+	// Leases, when set, leases each wave's devices (by lease.Key, the
+	// management address) before any session opens
 	// and releases them after the wave, so other tools cannot change them
 	// meanwhile. A conflict fails the wave's devices with session_busy.
 	Leases *lease.Manager
@@ -487,7 +488,7 @@ func (r DeployRequest[C]) lease(ctx context.Context, w rollout.Wave, byID map[st
 	}
 	ids := make([]string, len(w.Devices))
 	for i, d := range w.Devices {
-		ids[i] = d.ID
+		ids[i] = lease.Key(d)
 	}
 	ttl := r.LeaseTTL
 	if ttl <= 0 {

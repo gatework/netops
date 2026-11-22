@@ -158,7 +158,7 @@ rules:
 
   - name: leases are self-contained
     packages: [./lease]
-    only_local: [./evidence]
+    only_local: [./device, ./evidence]
 
   - name: lifecycle judges devices against a version policy
     packages: [./lifecycle]

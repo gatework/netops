@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gatework/netops/device"
 	"github.com/gatework/netops/evidence"
 )
 
@@ -16,6 +17,10 @@ var ErrHeld = errors.New("lease: device is held")
 
 // ErrInvalid reports an invalid request.
 var ErrInvalid = errors.New("lease: invalid")
+
+// Key returns the lease key of a device: its management address, the one
+// name every tool agrees on.
+func Key(d device.Device) string { return d.Mgmt.Unmap().String() }
 
 // Holder identifies who holds a lease. Two holders are the same only when
 // every field is equal.
