@@ -174,7 +174,7 @@ func addressSet(values []string) (*netipx.IPSet, error) {
 type textRules struct {
 	mode             MatchMode
 	include, exclude []string
-	globs            map[string]glob.Glob
+	globs            map[string]*glob.Pattern
 }
 
 func newTextRules(include, exclude []string, mode MatchMode) (textRules, error) {
@@ -184,7 +184,7 @@ func newTextRules(include, exclude []string, mode MatchMode) (textRules, error) 
 	if !slices.Contains([]MatchMode{MatchContains, MatchPrefix, MatchGlob}, mode) {
 		return textRules{}, fmt.Errorf("%w: name_match %q", ErrInvalid, mode)
 	}
-	t := textRules{mode: mode, globs: map[string]glob.Glob{}}
+	t := textRules{mode: mode, globs: map[string]*glob.Pattern{}}
 	for i, list := range [][]string{include, exclude} {
 		for _, v := range list {
 			if strings.TrimSpace(v) == "" || strings.IndexFunc(v, unicode.IsControl) >= 0 {

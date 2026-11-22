@@ -21,7 +21,8 @@ import (
 // BackupRequest backs up running configurations into the archive.
 type BackupRequest struct {
 	Devices []device.Device
-	// Command returns the command that prints the running configuration.
+	// Command returns the command that prints the running configuration,
+	// for sessions that do not implement ConfigReader.
 	Command func(device.Device) string
 	// Dialect returns the configuration dialect used for normalization.
 	Dialect func(device.Device) config.Dialect
@@ -48,7 +49,7 @@ func Backup(ctx context.Context, r BackupRequest) (batch.Report[config.Archived]
 	rep, err := batch.Run(ctx, r.Devices, batch.Options[config.Archived]{
 		Workers: r.Workers, Timeout: r.Timeout, Events: r.Events, Now: now,
 		Task: func(ctx context.Context, d device.Device) (config.Archived, error) {
-			text, at, err := runningConfig(ctx, r.Dialer, d, r.Command(d), now)
+			text, at, err := runningConfig(ctx, r.Dialer, d, r.Command, now)
 			if err != nil {
 				return config.Archived{}, err
 			}
@@ -66,10 +67,19 @@ func Backup(ctx context.Context, r BackupRequest) (batch.Report[config.Archived]
 }
 
 // runningConfig returns the configuration body, without echo and prompt.
-func runningConfig(ctx context.Context, dialer Dialer, d device.Device, command string, now func() time.Time) (string, time.Time, error) {
+func runningConfig(ctx context.Context, dialer Dialer, d device.Device, commandOf func(device.Device) string, now func() time.Time) (string, time.Time, error) {
 	var text string
 	at := now().UTC()
 	opErr, closeErr := dialer.Open(ctx, d, func(ctx context.Context, s Session) error {
+		if cr, ok := s.(ConfigReader); ok {
+			cfg, err := cr.Config(ctx)
+			if err != nil {
+				return err
+			}
+			text, at = strings.TrimRight(cfg, "\n")+"\n", now().UTC()
+			return nil
+		}
+		command := commandOf(d)
 		c, err := s.Collect(ctx, []string{command})
 		if err != nil {
 			return err

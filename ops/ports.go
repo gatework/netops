@@ -29,6 +29,14 @@ type Session interface {
 	Rollback(ctx context.Context, name string) error
 }
 
+// ConfigReader is an optional Session capability: reading the running
+// configuration the platform's own way, with its guards and completeness
+// checks (a closing line, an unchanged candidate). Backup prefers it over
+// collecting BackupRequest.Command.
+type ConfigReader interface {
+	Config(ctx context.Context) (string, error)
+}
+
 // Dialer opens sessions. connect.Dialer.Port implements it.
 type Dialer interface {
 	// Open runs fn with a session on d and reports the operation error and
