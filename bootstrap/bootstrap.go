@@ -121,6 +121,24 @@ func (e Env) DataDir() string {
 	return filepath.Join(e.Home, filepath.FromSlash(DataHome), e.App)
 }
 
+// LeaseArea is the SharedDir every tool keeps device leases in, so that a
+// change by one tool excludes changes by the others.
+const LeaseArea = "leases"
+
+// SharedDir returns ~/.local/share/gatework/<name>, a data area shared by
+// every gatework tool rather than owned by one, or "" without a home
+// directory. $GATEWORK_<NAME>_DIR overrides it, for hosts where tools run
+// as different users and share a group directory.
+func (e Env) SharedDir(name string) string {
+	if p := e.Environ["GATEWORK_"+strings.ToUpper(name)+"_DIR"]; p != "" {
+		return ResolvePath(p, ".", e.Home)
+	}
+	if e.Home == "" {
+		return ""
+	}
+	return filepath.Join(e.Home, filepath.FromSlash(DataHome), name)
+}
+
 // ResolvePath expands "~" and "~/..." with home and makes a relative path
 // relative to base.
 func ResolvePath(p, base, home string) string {

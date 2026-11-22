@@ -90,3 +90,15 @@ func ExampleResolvePath() {
 	// /home/ops/cache
 	// /etc/tool/cache
 }
+
+func TestEnv_SharedDir(t *testing.T) {
+	t.Parallel()
+	e := bootstrap.Env{App: "fabric", Home: "/home/ops", Environ: map[string]string{}}
+	if got := e.SharedDir(bootstrap.LeaseArea); got != filepath.Join("/home/ops", ".local", "share", "gatework", "leases") {
+		t.Errorf("SharedDir = %q", got)
+	}
+	e.Environ["GATEWORK_LEASES_DIR"] = "/srv/gatework/leases"
+	if got := e.SharedDir(bootstrap.LeaseArea); got != "/srv/gatework/leases" {
+		t.Errorf("override = %q", got)
+	}
+}

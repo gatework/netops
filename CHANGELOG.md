@@ -6,6 +6,12 @@
 
 ### Added
 
+- `bootstrap.Env.SharedDir` 与 `bootstrap.LeaseArea`：所有工具共享的数据区（默认 `~/.local/share/gatework/<name>`，可用 `$GATEWORK_<NAME>_DIR` 覆盖），设备租约必须放在这里才能跨工具互斥。
+
+## [0.5.0] - 2026-11-22
+
+### Added
+
 - 平台能力，对照商用 NCCM 与网络自动化产品补齐（[docs/design-platform.md](docs/design-platform.md)）：
   - `event`：运维事件模型（内容派生 ID）、过滤路由与总线；
   - `notify`：JSONL 文件、HMAC-SHA256 签名且有界重试的 Webhook、终端投递；
