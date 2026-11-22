@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 设备租约改为按管理地址（`lease.Key`）记录：各工具对设备的命名不同（交换机名、地址、清单 ID），按 ID 记录的租约无法跨工具互斥。`ops.Deploy` 已改为按 `lease.Key` 获取租约。
+
+## [0.5.1] - 2026-11-22
+
 ### Added
 
 - `bootstrap.Env.SharedDir` 与 `bootstrap.LeaseArea`：所有工具共享的数据区（默认 `~/.local/share/gatework/<name>`，可用 `$GATEWORK_<NAME>_DIR` 覆盖），设备租约必须放在这里才能跨工具互斥。

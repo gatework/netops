@@ -64,7 +64,7 @@ func TestDeploy_authorizeLeaseNotify(t *testing.T) {
 
 	st, _ := filelease.Open(t.TempDir())
 	leases := lease.NewManager(st, func() time.Time { return t0 })
-	other, err := leases.Acquire(t.Context(), []string{"sw2"}, lease.Holder{Tool: "firemon", Actor: "bob"}, time.Hour)
+	other, err := leases.Acquire(t.Context(), []string{lease.Key(devices(2)[1])}, lease.Holder{Tool: "firemon", Actor: "bob"}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestDeploy_authorizeLeaseNotify(t *testing.T) {
 	if got := kinds(mem.Events()); len(got) != 2 || got[0] != string(event.KindChangeExecuted) {
 		t.Errorf("events %v", got)
 	}
-	if hs, _ := leases.Holders(t.Context(), []string{"sw1", "sw2"}); len(hs) != 0 {
+	if hs, _ := leases.Holders(t.Context(), []string{lease.Key(devices(2)[0]), lease.Key(devices(2)[1])}); len(hs) != 0 {
 		t.Errorf("leases not released: %+v", hs)
 	}
 	if j.last("chg/sw1").Status != apply.StatusVerified {

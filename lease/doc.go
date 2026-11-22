@@ -6,7 +6,12 @@
 // expires after its TTL, so a crashed process cannot block a device
 // forever. A Manager acquires leases for a set of devices all-or-nothing,
 // renews them for long rollouts and releases only what it holds. A
-// conflict reports the current holder instead of taking over. The Store
+// conflict reports the current holder instead of taking over.
+//
+// Tools name devices differently (a switch name, an address, an inventory
+// ID), so a lease is keyed by the device's management address: Key returns
+// it, and every tool must lease by Key for leases to exclude each other.
+// The Store
 // port performs each read-modify-write atomically; store/lease provides
 // the file implementation.
 package lease
