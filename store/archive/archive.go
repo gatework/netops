@@ -20,8 +20,9 @@ const MaxConfig = 64 << 20
 
 const lockWait = 30 * time.Second
 
-// ErrNotFound reports a device or version that is not archived.
-var ErrNotFound = errors.New("archive: not found")
+// ErrNotFound reports a device or version that is not archived. It is
+// config.ErrNotArchived, so callers holding only the ops port can test it.
+var ErrNotFound = config.ErrNotArchived
 
 type index struct {
 	Schema int    `json:"schema"`

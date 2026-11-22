@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"time"
 
 	"github.com/gatework/netops/evidence"
@@ -41,3 +42,7 @@ type Archived struct {
 	// Previous is the version before, when any.
 	Previous *Version `json:"previous,omitempty"`
 }
+
+// ErrNotArchived reports a device or version missing from a configuration
+// archive.
+var ErrNotArchived = errors.New("config: not archived")

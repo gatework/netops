@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- 平台能力，对照商用 NCCM 与网络自动化产品补齐（[docs/design-platform.md](docs/design-platform.md)）：
+  - `event`：运维事件模型（内容派生 ID）、过滤路由与总线；
+  - `notify`：JSONL 文件、HMAC-SHA256 签名且有界重试的 Webhook、终端投递；
+  - `job`：调度表达式（`@every`、`@hourly`、`@daily`、`@weekly`、5 段 cron）与不重叠的调度器；`store/runs` 保存运行历史；
+  - `lease`：跨工具设备租约，全部成功或全部回退，TTL 过期接管；`store/lease` 为文件实现；
+  - `lifecycle`：多厂商版本比较，以及目标、最低、禁用版本与 EOS/EOL 策略；
+  - `authz`：角色、权限与设备作用域；
+  - `report`：统一报表与文本、Markdown、CSV、JSON 渲染。
+- `batch.Options.Retry`（只读任务的有界重试，默认只重试瞬时失败）与 `Partition`/`PartitionLimit`（按分区限流）；`batch.Result.Attempts`。
+- `ops.Deploy`：
+  - `Authorize`：任何设备越权即整体拒绝（`ErrUnauthorized`，`DeployReport.Denied`）；
+  - `Leases`/`Holder`/`LeaseTTL`：按波次租约；
+  - `Notify`：发布变更事件。
+- `ops.Collect` 与 `ops.Backup` 增加 `Pacing` 与 `Notify`（`collect.failed`、`config.changed`）。
+- `ops.CheckSync`：只读的带外变更检测（`in_sync`、`out_of_sync`、`no_baseline`）与 `ops.Versions` 端口。
+
+### Changed
+
+- `store/archive.ErrNotFound` 现在就是 `config.ErrNotArchived`，只依赖端口的调用方也能识别"未归档"。`errors.Is` 的判断结果不变，只是错误文本变了。
+
 ## [0.4.0] - 2026-11-21
 
 ### Added

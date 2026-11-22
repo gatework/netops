@@ -38,6 +38,15 @@ declared:
   - ./bootstrap
   - ./term
   - ./ops
+  - ./event
+  - ./notify
+  - ./job
+  - ./lease
+  - ./lifecycle
+  - ./authz
+  - ./report
+  - ./store/runs
+  - ./store/lease
   - ./internal/fake
 
 rules:
@@ -60,7 +69,7 @@ rules:
   - name: domain packages stay free of I/O and transport
     packages: [./secret, ./failure, ./evidence, ./device, ./iface, ./neighbor, ./facts, ./describe, ./parse, ./capture,
                ./config, ./diff, ./drift, ./assess, ./baseline, ./health, ./change, ./governance, ./rollout,
-               ./apply, ./batch, ./cache, ./ops]
+               ./apply, ./batch, ./cache, ./ops, ./event, ./job, ./lease, ./lifecycle, ./authz, ./report]
     deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall]
 
   - name: foundation depends on nothing local
@@ -134,6 +143,38 @@ rules:
   - name: batch and cache schedule devices
     packages: [./batch, ./cache]
     only_local: [./device, ./evidence, ./failure]
+
+  - name: events are a vocabulary over the model
+    packages: [./event]
+    only_local: [./assess, ./device, ./evidence]
+
+  - name: notify delivers events and nothing else
+    packages: [./notify]
+    only_local: [./event, ./secret, ./store/disk, ./term, ./assess, ./device, ./evidence]
+
+  - name: scheduling knows failures and events only
+    packages: [./job]
+    only_local: [./event, ./failure, ./assess, ./device, ./evidence]
+
+  - name: leases are self-contained
+    packages: [./lease]
+    only_local: [./evidence]
+
+  - name: lifecycle judges devices against a version policy
+    packages: [./lifecycle]
+    only_local: [./assess, ./device, ./evidence]
+
+  - name: authorization knows devices only
+    packages: [./authz]
+    only_local: [./device]
+
+  - name: reports render findings and tables
+    packages: [./report]
+    only_local: [./assess, ./evidence, ./term]
+
+  - name: run history and lease files implement their ports
+    packages: [./store/runs, ./store/lease]
+    only_local: [./store, ./store/disk, ./job, ./lease, ./event, ./failure, ./assess, ./device, ./evidence]
 
   - name: stores persist domain values only
     packages: [./store, ./store/...]

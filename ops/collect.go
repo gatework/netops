@@ -7,11 +7,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/gatework/netops/assess"
 	"github.com/gatework/netops/batch"
 	"github.com/gatework/netops/cache"
 	"github.com/gatework/netops/capture"
 	"github.com/gatework/netops/device"
+	"github.com/gatework/netops/event"
 	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/failure"
 )
 
 // CollectRequest collects dimensions from devices into the snapshot store.
@@ -28,7 +31,11 @@ type CollectRequest struct {
 	// merged into the store, for derived records such as sighting logs.
 	// Its error fails the device.
 	OnCapture func(ctx context.Context, d device.Device, fresh capture.Capture) error
-	Now       func() time.Time
+	// Pacing adds retries of transient failures and a per-site cap.
+	Pacing Pacing
+	// Notify publishes collect.failed for devices that failed.
+	Notify Notify
+	Now    func() time.Time
 }
 
 // Collect opens one session per device, runs the probe commands, merges
@@ -39,12 +46,18 @@ func Collect(ctx context.Context, r CollectRequest) (batch.Report[capture.Captur
 		return batch.Report[capture.Capture]{}, fmt.Errorf("ops: collect: missing dependency")
 	}
 	now := clock(r.Now)
-	rep, err := batch.Run(ctx, r.Devices, batch.Options[capture.Capture]{
+	rep, err := batch.Run(ctx, r.Devices, pace(r.Pacing, batch.Options[capture.Capture]{
 		Workers: r.Workers, Timeout: r.Timeout, Events: r.Events, Now: now,
 		Task: func(ctx context.Context, d device.Device) (capture.Capture, error) {
 			return collectOne(ctx, r, d, now)
 		},
-	})
+	}))
+	for _, res := range rep.Results {
+		if res.State == batch.StateFailed {
+			r.Notify.emit(ctx, event.KindCollectFailed, assess.SeverityMedium, now(), res.Device,
+				"collection of "+res.Device.Label()+" failed", event.Fields("code", string(failure.Primary(res.Err)))...)
+		}
+	}
 	if err != nil {
 		return rep, fmt.Errorf("ops: collect: %w", err)
 	}

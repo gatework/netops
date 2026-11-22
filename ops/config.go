@@ -13,6 +13,7 @@ import (
 	"github.com/gatework/netops/config"
 	"github.com/gatework/netops/device"
 	"github.com/gatework/netops/diff"
+	"github.com/gatework/netops/event"
 	"github.com/gatework/netops/evidence"
 	"github.com/gatework/netops/failure"
 	"github.com/gatework/netops/parse"
@@ -32,7 +33,12 @@ type BackupRequest struct {
 	Workers int
 	Timeout time.Duration
 	Events  batch.Events[config.Archived]
-	Now     func() time.Time
+	// Pacing adds retries of transient failures and a per-site cap.
+	Pacing Pacing
+	// Notify publishes config.changed for configurations that changed since
+	// their previous version.
+	Notify Notify
+	Now    func() time.Time
 }
 
 // Backup collects each configuration, normalizes it and archives it. An
@@ -46,7 +52,7 @@ func Backup(ctx context.Context, r BackupRequest) (batch.Report[config.Archived]
 	if source == "" {
 		source = "backup"
 	}
-	rep, err := batch.Run(ctx, r.Devices, batch.Options[config.Archived]{
+	rep, err := batch.Run(ctx, r.Devices, pace(r.Pacing, batch.Options[config.Archived]{
 		Workers: r.Workers, Timeout: r.Timeout, Events: r.Events, Now: now,
 		Task: func(ctx context.Context, d device.Device) (config.Archived, error) {
 			text, at, err := runningConfig(ctx, r.Dialer, d, r.Command, now)
@@ -59,7 +65,14 @@ func Backup(ctx context.Context, r BackupRequest) (batch.Report[config.Archived]
 			}
 			return r.Archive.Put(ctx, config.Backup{Device: d.ID, Text: text, Normalized: doc.Digest(), At: at, Source: source})
 		},
-	})
+	}))
+	for _, res := range rep.Results {
+		if a := res.Value; res.State == batch.StateSucceeded && a.Changed && a.Previous != nil {
+			r.Notify.emit(ctx, event.KindConfigChanged, assess.SeverityLow, a.Version.At, res.Device,
+				fmt.Sprintf("configuration changed: version %d replaces %d", a.Version.Seq, a.Previous.Seq),
+				event.Fields("version", event.Int(a.Version.Seq), "previous", event.Int(a.Previous.Seq), "digest", a.Version.Digest.Short())...)
+		}
+	}
 	if err != nil {
 		return rep, fmt.Errorf("ops: backup: %w", err)
 	}
