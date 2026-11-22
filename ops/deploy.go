@@ -9,13 +9,16 @@ import (
 	"time"
 
 	"github.com/gatework/netops/apply"
+	"github.com/gatework/netops/assess"
 	"github.com/gatework/netops/batch"
 	"github.com/gatework/netops/change"
 	"github.com/gatework/netops/device"
+	"github.com/gatework/netops/event"
 	"github.com/gatework/netops/evidence"
 	"github.com/gatework/netops/failure"
 	"github.com/gatework/netops/governance"
 	"github.com/gatework/netops/health"
+	"github.com/gatework/netops/lease"
 	"github.com/gatework/netops/rollout"
 	"github.com/gatework/netops/secret"
 )
@@ -57,6 +60,21 @@ type DeployRequest[C any] struct {
 	Save   bool
 	Redact secret.Redactor
 	Events batch.Events[Outcome]
+	// Authorize, when set, must allow every planned device before anything
+	// runs; one refusal refuses the whole change set.
+	Authorize func(device.Device) error
+	// Leases, when set, leases each wave's devices before any session opens
+	// and releases them after the wave, so other tools cannot change them
+	// meanwhile. A conflict fails the wave's devices with session_busy.
+	Leases *lease.Manager
+	// Holder identifies this deployment in leases; Purpose defaults to the
+	// change-set digest.
+	Holder lease.Holder
+	// LeaseTTL bounds a lease if the process dies; zero means one hour.
+	LeaseTTL time.Duration
+	// Notify publishes change.executed, change.failed, change.uncertain,
+	// change.rolled_back and lease.conflict.
+	Notify Notify
 	Now    func() time.Time
 }
 
@@ -92,9 +110,11 @@ type DeployReport struct {
 	Gate      *governance.Decision `json:"gate,omitempty"`
 	Waves     []WaveReport         `json:"waves"`
 	// Pending lists devices not attempted because the rollout stopped.
-	Pending     []device.Device `json:"pending,omitempty"`
-	Stopped     bool            `json:"stopped"`
-	Interrupted bool            `json:"interrupted"`
+	Pending []device.Device `json:"pending,omitempty"`
+	// Denied lists the authorization refusals that stopped the change set.
+	Denied      []string `json:"denied,omitempty"`
+	Stopped     bool     `json:"stopped"`
+	Interrupted bool     `json:"interrupted"`
 }
 
 // Succeeded reports whether every device succeeded.
@@ -112,6 +132,10 @@ func (r DeployReport) Succeeded() bool {
 
 // ErrDenied reports a change set refused by governance.
 var ErrDenied = errors.New("ops: change denied by governance")
+
+// ErrUnauthorized reports a change set touching a device the actor may
+// not change.
+var ErrUnauthorized = errors.New("ops: change not authorized")
 
 // ChangeSet returns the digest identifying a set of plans, the subject of
 // approvals: the digest of the sorted plan digests.
@@ -150,6 +174,19 @@ func Deploy[C any](ctx context.Context, r DeployRequest[C]) (DeployReport, error
 		return DeployReport{}, fmt.Errorf("ops: deploy: %w", err)
 	}
 	rep := DeployReport{ChangeSet: set}
+	if r.Authorize != nil {
+		for _, t := range targets {
+			if err := r.Authorize(t); err != nil {
+				rep.Denied = append(rep.Denied, err.Error())
+			}
+		}
+		if len(rep.Denied) > 0 {
+			return rep, ErrUnauthorized
+		}
+	}
+	if r.Holder.Purpose == "" {
+		r.Holder.Purpose = set.Short()
+	}
 	if r.Governance != nil {
 		req := r.Governance.Request
 		req.Plan, req.Devices = set, len(r.Plans)
@@ -182,6 +219,12 @@ func (r DeployRequest[C]) run(ctx context.Context, rep DeployReport, waves []rol
 			}
 			break
 		}
+		leased, held := r.lease(ctx, w, byID)
+		if held != nil {
+			rep.Waves = append(rep.Waves, *held)
+			tracker.Finish(len(held.Outcomes))
+			continue
+		}
 		res, err := batch.Run(ctx, w.Devices, batch.Options[Outcome]{
 			Workers: len(w.Devices), Events: r.Events, Now: r.Now,
 			Task: func(ctx context.Context, d device.Device) (Outcome, error) {
@@ -204,6 +247,12 @@ func (r DeployRequest[C]) run(ctx context.Context, rep DeployReport, waves []rol
 				failed++
 			}
 		}
+		if r.Leases != nil {
+			if rerr := r.Leases.Release(context.WithoutCancel(ctx), leased); rerr != nil && r.Notify.OnError != nil {
+				r.Notify.OnError(rerr)
+			}
+		}
+		r.announce(ctx, wr.Outcomes)
 		rep.Waves = append(rep.Waves, wr)
 		tracker.Finish(failed)
 		if err != nil && ctx.Err() == nil {
@@ -428,4 +477,66 @@ func scheduled[C any](waves []rollout.Wave, byID map[string]*change.Plan[C]) err
 		return fmt.Errorf("ops: deploy: waves leave %d planned devices out", len(byID)-len(seen))
 	}
 	return nil
+}
+
+// lease takes the wave's leases. On a conflict it returns the wave with
+// every device failed as busy, and nothing is opened.
+func (r DeployRequest[C]) lease(ctx context.Context, w rollout.Wave, byID map[string]*change.Plan[C]) (lease.Set, *WaveReport) {
+	if r.Leases == nil {
+		return lease.Set{}, nil
+	}
+	ids := make([]string, len(w.Devices))
+	for i, d := range w.Devices {
+		ids[i] = d.ID
+	}
+	ttl := r.LeaseTTL
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	set, err := r.Leases.Acquire(ctx, ids, r.Holder, ttl)
+	if err == nil {
+		return set, nil
+	}
+	now := clock(r.Now)().UTC()
+	wr := &WaveReport{Wave: w}
+	for _, d := range w.Devices {
+		p := byID[d.ID]
+		o := Outcome{Device: d, Plan: p.Meta().ID, Codes: []failure.Code{failure.CodeBusy}, Record: apply.Record{
+			Schema: apply.SchemaVersion, Identity: apply.Identity{Device: d, PlanID: p.Meta().ID, Baseline: p.Baseline()},
+			Mode: r.mode(), Status: apply.StatusFailed, Failure: failure.CodeBusy, Stage: apply.StageJournal,
+			Started: now, Finished: now,
+		}}
+		wr.Outcomes = append(wr.Outcomes, o)
+	}
+	summary := "devices of wave " + fmt.Sprint(w.Index) + " are leased by another change"
+	var fields []evidence.Field
+	if held, ok := errors.AsType[*lease.HeldError](err); ok {
+		summary = held.Lease.Device + " is leased by " + held.Lease.Holder.String()
+		fields = event.Fields("holder", held.Lease.Holder.String(), "until", held.Lease.Expires.Format(time.RFC3339))
+	}
+	r.Notify.emit(ctx, event.KindLeaseConflict, assess.SeverityMedium, now, w.Devices[0], summary, fields...)
+	return lease.Set{}, wr
+}
+
+// announce publishes the outcome of each device that wrote or tried to.
+func (r DeployRequest[C]) announce(ctx context.Context, outcomes []Outcome) {
+	for _, o := range outcomes {
+		at := o.Record.Finished
+		if at.IsZero() {
+			at = clock(r.Now)()
+		}
+		fields := event.Fields("plan", o.Plan, "status", string(o.Record.Status))
+		switch {
+		case o.RolledBack:
+			r.Notify.emit(ctx, event.KindChangeRolledBack, assess.SeverityHigh, at, o.Device, "change "+o.Plan+" was rolled back after a failed health gate", fields...)
+		case o.Record.Status == apply.StatusUncertain:
+			r.Notify.emit(ctx, event.KindChangeUncertain, assess.SeverityCritical, at, o.Device, "change "+o.Plan+" may be partly applied; verify by hand", fields...)
+		case o.Record.Status == apply.StatusFailed:
+			r.Notify.emit(ctx, event.KindChangeFailed, assess.SeverityHigh, at, o.Device, "change "+o.Plan+" failed before writing", append(fields, event.Fields("code", string(primary(o)))...)...)
+		case o.Record.Status == apply.StatusVerified && o.Succeeded():
+			r.Notify.emit(ctx, event.KindChangeExecuted, assess.SeverityInfo, at, o.Device, "change "+o.Plan+" verified", fields...)
+		case o.Record.Status == apply.StatusVerified:
+			r.Notify.emit(ctx, event.KindChangeFailed, assess.SeverityHigh, at, o.Device, "change "+o.Plan+" verified but failed afterwards", append(fields, event.Fields("code", string(primary(o)))...)...)
+		}
+	}
 }

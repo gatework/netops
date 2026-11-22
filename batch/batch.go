@@ -43,6 +43,8 @@ type Result[T any] struct {
 	Codes    []failure.Code `json:"codes,omitempty"`
 	Started  time.Time      `json:"started,omitzero"`
 	Duration time.Duration  `json:"duration"`
+	// Attempts is how many times the task ran (more than one with Retry).
+	Attempts int `json:"attempts,omitempty"`
 	// Persisted reports whether the Sink accepted the result.
 	Persisted bool `json:"persisted"`
 }
@@ -70,6 +72,14 @@ type Options[T any] struct {
 	Events   Events[T]
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+	// Retry re-runs a failed task, for read-only tasks only: a write must
+	// never be replayed. Nil runs each task once.
+	Retry *Retry
+	// Partition groups devices, such as by site; PartitionLimit bounds how
+	// many devices of one group run at once (0 means no bound), so one
+	// site's WAN link or controller cluster is not overloaded.
+	Partition      func(device.Device) string
+	PartitionLimit int
 }
 
 // Report accounts for every requested device, ordered by device.
@@ -91,6 +101,15 @@ func Run[T any](ctx context.Context, devices []device.Device, o Options[T]) (Rep
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r := &runner[T]{o: o, cancel: cancel}
+	if o.PartitionLimit > 0 {
+		r.slots = map[string]chan struct{}{}
+		for _, d := range ordered {
+			if k := o.Partition(d); r.slots[k] == nil {
+				r.slots[k] = make(chan struct{}, o.PartitionLimit)
+			}
+		}
+		ordered = interleave(ordered, o.Partition)
+	}
 	rep := Report[T]{Results: make([]Result[T], len(ordered))}
 	var g errgroup.Group
 	g.SetLimit(o.Workers)
@@ -103,13 +122,22 @@ func Run[T any](ctx context.Context, devices []device.Device, o Options[T]) (Rep
 		}
 		g.Go(func() error {
 			// A device whose turn comes after cancellation stays skipped.
-			if runCtx.Err() == nil {
-				rep.Results[i] = r.device(runCtx, d)
+			if runCtx.Err() != nil {
+				return nil
 			}
+			release, ok := r.acquire(runCtx, d)
+			if !ok {
+				return nil
+			}
+			defer release()
+			rep.Results[i] = r.device(runCtx, d)
 			return nil
 		})
 	}
 	_ = g.Wait() // workers never return errors; failures are per device
+	if o.PartitionLimit > 0 {
+		slices.SortStableFunc(rep.Results, func(a, b Result[T]) int { return device.Compare(a.Device, b.Device) })
+	}
 	rep.SinkErr = r.sinkErr
 	rep.Interrupted = ctx.Err() != nil
 	switch {
@@ -134,6 +162,9 @@ func validate[T any](devices []device.Device, o *Options[T]) error {
 	if o.Classify == nil {
 		o.Classify = failure.Classify
 	}
+	if o.PartitionLimit < 0 || (o.PartitionLimit > 0 && o.Partition == nil) {
+		return fmt.Errorf("%w: partition limit %d needs a partition function", ErrInvalid, o.PartitionLimit)
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
@@ -150,12 +181,67 @@ func validate[T any](devices []device.Device, o *Options[T]) error {
 	return nil
 }
 
+// interleave orders devices round-robin across partitions, so that workers
+// rarely wait on a full partition while others are idle. Order within a
+// partition is kept.
+func interleave(ds []device.Device, key func(device.Device) string) []device.Device {
+	var keys []string
+	groups := map[string][]device.Device{}
+	for _, d := range ds {
+		k := key(d)
+		if _, ok := groups[k]; !ok {
+			keys = append(keys, k)
+		}
+		groups[k] = append(groups[k], d)
+	}
+	out := make([]device.Device, 0, len(ds))
+	for len(out) < len(ds) {
+		for _, k := range keys {
+			if g := groups[k]; len(g) > 0 {
+				out = append(out, g[0])
+				groups[k] = g[1:]
+			}
+		}
+	}
+	return out
+}
+
+// Retry is a bounded retry policy.
+type Retry struct {
+	// Attempts is the total number of runs, at least 2 to retry at all.
+	Attempts int
+	// Backoff is the wait before the second run, doubled for each further
+	// run; zero means 2s.
+	Backoff time.Duration
+	// Retryable decides from the failure codes; nil retries only timeouts,
+	// unreachable devices and busy or closed sessions.
+	Retryable func([]failure.Code) bool
+}
+
+// Transient reports codes that a later attempt may not see: timeouts,
+// unreachable devices, busy or closed sessions. Authentication failures,
+// locked accounts and rejected commands are never transient.
+func Transient(codes []failure.Code) bool {
+	if len(codes) == 0 {
+		return false
+	}
+	transient := []failure.Code{failure.CodeTimeout, failure.CodeUnreachable, failure.CodeBusy, failure.CodeClosed}
+	for _, c := range codes {
+		if !slices.Contains(transient, c) {
+			return false
+		}
+	}
+	return true
+}
+
 type runner[T any] struct {
 	o      Options[T]
 	cancel context.CancelFunc
 
 	mu      sync.Mutex // serializes Sink and Events, guards sinkErr
 	sinkErr error
+
+	slots map[string]chan struct{} // per-partition semaphores, fixed after construction
 }
 
 func (r *runner[T]) device(ctx context.Context, d device.Device) Result[T] {
@@ -165,13 +251,7 @@ func (r *runner[T]) device(ctx context.Context, d device.Device) Result[T] {
 		r.o.Events.Started(d.Clone())
 	}
 	r.mu.Unlock()
-	taskCtx := ctx
-	if r.o.Timeout > 0 {
-		var cancel context.CancelFunc
-		taskCtx, cancel = context.WithTimeout(ctx, r.o.Timeout)
-		defer cancel()
-	}
-	res.Value, res.Err = r.o.Task(taskCtx, d.Clone())
+	res.Value, res.Attempts, res.Err = r.attempts(ctx, d)
 	res.Duration = r.o.Now().Sub(res.Started)
 	res.State = StateSucceeded
 	if res.Err != nil {
@@ -193,6 +273,65 @@ func (r *runner[T]) device(ctx context.Context, d device.Device) Result[T] {
 		r.o.Events.Finished(res)
 	}
 	return res
+}
+
+// attempts runs the task, retrying under the policy.
+func (r *runner[T]) attempts(ctx context.Context, d device.Device) (T, int, error) {
+	limit, backoff, retryable := 1, 2*time.Second, Transient
+	if p := r.o.Retry; p != nil {
+		limit = max(p.Attempts, 1)
+		if p.Backoff > 0 {
+			backoff = p.Backoff
+		}
+		if p.Retryable != nil {
+			retryable = p.Retryable
+		}
+	}
+	var v T
+	var err error
+	n := 0
+	for n < limit {
+		if n > 0 {
+			t := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return v, n, errors.Join(err, ctx.Err())
+			case <-t.C:
+			}
+			backoff *= 2
+		}
+		n++
+		v, err = r.once(ctx, d)
+		if err == nil || ctx.Err() != nil || !retryable(r.o.Classify(err)) {
+			break
+		}
+	}
+	return v, n, err
+}
+
+func (r *runner[T]) once(ctx context.Context, d device.Device) (T, error) {
+	if r.o.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.o.Timeout)
+		defer cancel()
+	}
+	return r.o.Task(ctx, d.Clone())
+}
+
+// acquire takes the device's partition slot, or returns false when ctx
+// ends first. release must be called after a true result.
+func (r *runner[T]) acquire(ctx context.Context, d device.Device) (release func(), ok bool) {
+	if r.slots == nil {
+		return func() {}, true
+	}
+	slot := r.slots[r.o.Partition(d)]
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, true
+	case <-ctx.Done():
+		return nil, false
+	}
 }
 
 // DeviceSummary is the serializable outcome of one device.

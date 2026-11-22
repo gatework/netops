@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,4 +82,57 @@ func ExampleRun() {
 	// 192.0.2.1 succeeded d0
 	// 192.0.2.2 succeeded d1
 	// 192.0.2.3 succeeded d2
+}
+
+func TestRun_retryAndPartition(t *testing.T) {
+	t.Parallel()
+	ds := fleet(6)
+	for i := range ds {
+		ds[i].Site = fmt.Sprint("s", i%2)
+	}
+	var mu sync.Mutex
+	running, peak := map[string]int{}, 0
+	tries := map[string]int{}
+	rep, err := batch.Run(t.Context(), ds, batch.Options[int]{
+		Workers: 6, Partition: func(d device.Device) string { return d.Site }, PartitionLimit: 1,
+		Retry: &batch.Retry{Attempts: 3, Backoff: time.Millisecond},
+		Task: func(ctx context.Context, d device.Device) (int, error) {
+			mu.Lock()
+			running[d.Site]++
+			peak = max(peak, running[d.Site])
+			tries[d.ID]++
+			n := tries[d.ID]
+			mu.Unlock()
+			time.Sleep(time.Millisecond)
+			mu.Lock()
+			running[d.Site]--
+			mu.Unlock()
+			switch {
+			case d.ID == "d1" && n < 3:
+				return 0, failure.New(failure.CodeTimeout, "read")
+			case d.ID == "d2":
+				return 0, failure.New(failure.CodeAuth, "login")
+			}
+			return n, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peak != 1 {
+		t.Errorf("partition limit exceeded: %d at once", peak)
+	}
+	byID := map[string]batch.Result[int]{}
+	for _, r := range rep.Results {
+		byID[r.Device.ID] = r
+	}
+	if r := byID["d1"]; r.State != batch.StateSucceeded || r.Attempts != 3 {
+		t.Errorf("transient failure not retried: %+v", r)
+	}
+	if r := byID["d2"]; r.State != batch.StateFailed || r.Attempts != 1 {
+		t.Errorf("auth failure retried: %+v", r)
+	}
+	if rep.Results[0].Device.ID != "d0" {
+		t.Error("results not in device order")
+	}
 }

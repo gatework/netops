@@ -22,6 +22,15 @@
 | 变更管理 | `change` `governance` `rollout` `store/journal` | 不可变计划与防篡改信封；窗口、封网、审批；分波与反亲和；审计 |
 | 批量下发 | `apply` `ops.Deploy` `ops.Rollback` | 单设备执行状态机；治理→分波→单会话（健康、检查点、执行、门禁、回滚、保存） |
 | 工具装配 | `credential` `bootstrap` `term` | 凭据提供者；配置发现与 .env；退出码、表格、确认、JSON、中文文案 |
+| 事件与告警 | `event` `notify` | 运维事件模型（内容派生 ID、过滤路由）；JSONL 文件、HMAC 签名 Webhook、终端投递 |
+| 作业调度 | `job` `store/runs` | `@every`/`@daily`/5 段 cron（显式时区）；不重叠、不补跑；运行历史 |
+| 设备租约 | `lease` `store/lease` | 跨工具、跨进程的设备变更互斥；TTL 过期接管；冲突报告持有者 |
+| 软件生命周期 | `lifecycle` | 多厂商版本比较；目标/最低/禁用版本与 EOS/EOL 策略；转为发现 |
+| 权限 | `authz` | 角色、权限、按设备选择器的作用域；拒绝时给出原因 |
+| 报表 | `report` | 统一文档模型；文本、Markdown、CSV（防公式注入）、JSON |
+| 带外变更检测 | `ops.CheckSync` | 运行配置与版本库最新版本比较（只读），不一致时发布事件 |
+
+平台能力（事件、调度、租约、生命周期、权限、报表）的设计与商用产品对照见 [docs/design-platform.md](docs/design-platform.md)。
 
 ## 最小用法
 
